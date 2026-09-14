@@ -8,26 +8,62 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  release:
+  build:
     name: release ${{ matrix.target }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-pc-windows-gnu
+            os: windows-latest
           - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
           - target: x86_64-apple-darwin
-          - target: wasm32-wasi
+            os: macos-latest
     steps:
     - uses: actions/checkout@v7
-    - name: Rust Release binary
-    # You may pin to the exact commit or the version.
-    # uses: rust-build/rust-build.action@6febf1b0ed6499a46610b58ef9d810398e75f3c2
-      uses: rust-build/rust-build.action@v1.4.5
-      env: 
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: setup rust
+      uses: dtolnay/rust-toolchain@stable
       with:
-        TOOLCHAIN_VERSION: stable
-        RUSTTARGET: ${{ matrix.target }}
+        targets: ${{ matrix.target }}
+    
+    - name: Cache cargo
+      uses: actions/cache@v5
+      with:
+        path: |
+          target/
+        key: agent-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: agent-${{ matrix.target }}-cargo-
         
+    - name: Build
+      run: cargo build --release
+
+    - name: Upload a Build Artifact
+      uses: actions/upload-artifact@v7.0.1
+      with:
+          name: nanoid-cli-${{ github.ref_name }}-${{ matrix.os }}
+          path: |
+            target/release/nanoid-cli
+            target/release/nanoid-cli.exe
+            target/release/nanoid-cli.dmg
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      # This job never checks out or executes repository code. The write token is
+      # available only while collecting and publishing the completed artifacts.
+      - name: Download packaged binaries
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
